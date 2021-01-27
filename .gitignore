@@ -3,3 +3,5 @@ Deep-Learning
 *.zip
 *.png
 test.py
+.ipynb_checkpoints
+__pycache__
