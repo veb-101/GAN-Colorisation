@@ -1,9 +1,11 @@
 import gc
 import torch
+
+from torch.cuda import amp
 import torch.nn as nn
 import torch.optim as optim
 from utils import init_model
-from model import Discriminator, Generator_Unet
+from model import Discriminator, Generator_Res_Unet, Generator_Unet
 
 
 class GANLoss(nn.Module):
@@ -33,33 +35,57 @@ class MainModel(nn.Module):
     def __init__(
         self,
         net_G=None,
+        net_D=None,
+        opt_G=None,
+        opt_D=None,
+        scaler_G=None,
+        scaler_D=None,
         device=None,
-        lr_G=2e-4,
-        lr_D=2e-4,
-        beta1=0.5,
-        beta2=0.999,
-        lambda_L1=100.0,
+        lambda_L1=100.0
     ):
         super().__init__()
 
         self.device = device
+        if net_G:
+            self.net_G = net_G.to(self.device)
+        else:
+            self.net_G = init_model(Generator_Res_Unet().get_model(), self.device)
+        if net_D:
+            self.net_D = net_D.to(self.device)
+        else:
+            self.net_D = init_model(Discriminator(input_channels=3), self.device)
+
+        if scaler_G:
+            self.scaler_G = scaler_G
+        else:
+            self.scaler_G = amp.GradScaler()
+
+        if scaler_D:
+            self.scaler_D = scaler_D
+        else:
+            self.scaler_D = amp.GradScaler()
+
+        if opt_G:
+            self.opt_G = opt_G
+        else:
+            self.opt_G = optim.Adam(
+                self.net_G.parameters(), lr=lr_G, betas=(beta1, beta2)
+            )
+        if opt_D:
+            self.opt_D = opt_D
+        else:
+            self.opt_D = optim.Adam(
+                self.net_D.parameters(), lr=lr_D, betas=(beta1, beta2)
+            )
+
+        self.GANcriterion = GANLoss(gan_mode="vanilla").to(self.device)
+        self.L1criterion = nn.L1Loss().to(self.device)
         self.lambda_L1 = lambda_L1
 
-        if net_G is None:
-            self.net_G = init_model(Generator_Unet(), self.device)
-        else:
-            self.net_G = net_G.to(self.device)
-
-        self.net_D = init_model(Discriminator(input_channels=3), self.device)
-        self.GANcriterion = GANLoss(gan_mode="vanilla").to(self.device)
-        self.L1criterion = nn.L1Loss()
-        self.opt_G = optim.Adam(self.net_G.parameters(), lr=lr_G, betas=(beta1, beta2))
-        self.opt_D = optim.Adam(self.net_D.parameters(), lr=lr_D, betas=(beta1, beta2))
-
-    @staticmethod
-    def set_requires_grad(model, requires_grad=True):
-        for p in model.parameters():
-            p.requires_grad = requires_grad
+    # @staticmethod
+    # def set_requires_grad(model, requires_grad=True):
+    #     for p in model.parameters():
+    #         p.requires_grad = requires_grad
 
     def setup_input(self, data):
         self.L = data["L"].to(self.device)
@@ -68,41 +94,50 @@ class MainModel(nn.Module):
     def forward(self):
         self.fake_color = self.net_G(self.L)
 
-    def backward_G(self):
-        fake_image = torch.cat([self.L, self.fake_color], dim=1)
-        fake_preds = self.net_D(fake_image)
-        self.loss_G_GAN = self.GANcriterion(fake_preds, True)
-        self.loss_G_L1 = self.L1criterion(self.fake_color, self.ab) * self.lambda_L1
-        self.loss_G = self.loss_G_GAN + self.loss_G_L1
-        self.loss_G.backward()
-
-    def backward_D(self):
-        fake_image = torch.cat([self.L, self.fake_color], dim=1)
-        fake_preds = self.net_D(fake_image.detach())
-        self.loss_D_fake = self.GANcriterion(fake_preds, False)
-        real_image = torch.cat([self.L, self.ab], dim=1)
-        real_preds = self.net_D(real_image)
-        self.loss_D_real = self.GANcriterion(real_preds, True)
-        self.loss_D = (self.loss_D_fake + self.loss_D_real) / 2.0
-        self.loss_D.backward()
-
     def optimize(self):
         torch.cuda.empty_cache()
         gc.collect()
-        self.forward()
+
         self.net_D.train()
-        MainModel.set_requires_grad(self.net_D, True)
-        self.opt_D.zero_grad()
-        self.backward_D()
-        self.opt_D.step()
-        torch.cuda.empty_cache()
-        gc.collect()
-
         self.net_G.train()
-        MainModel.set_requires_grad(self.net_D, False)
-        self.opt_G.zero_grad()
-        self.backward_G()
-        self.opt_G.step()
+
+        with amp.autocast():
+            self.forward()  # generate fake images 2 channel
+            fake_image = torch.cat([self.L, self.fake_color], dim=1)  # combine image L channel and generated ab channels
+
+        # Train Discriminator
+        self.opt_D.zero_grad()
+
+        with amp.autocast():
+            # fake loss
+            fake_preds = self.net_D(fake_image.detach())
+            self.loss_D_fake = self.GANcriterion(fake_preds, False)
+            # real loss
+            real_image = torch.cat([self.L, self.ab], dim=1)
+            real_preds = self.net_D(real_image)
+            self.loss_D_real = self.GANcriterion(real_preds, True)
+            # discriminator final loss
+            self.loss_D = (self.loss_D_fake + self.loss_D_real) / 2.0
+
+        self.scaler_D.scale(self.loss_D).backward()
+        self.scaler_D.step(self.opt_D)
+
         torch.cuda.empty_cache()
         gc.collect()
 
+        # Train Generator
+        self.opt_G.zero_grad()
+
+        fake_image = torch.cat([self.L, self.fake_color], dim=1)
+
+        with amp.autocast():
+            fake_preds = self.net_D(fake_image)
+            self.loss_G_GAN = self.GANcriterion(fake_preds, True)
+            self.loss_G_L1 = self.L1criterion(self.fake_color, self.ab) * self.lambda_L1
+            self.loss_G = self.loss_G_GAN + self.loss_G_L1
+
+        self.scaler_G.scale(self.loss_G).backward()
+        self.scaler_G(self.opt_G).step()
+
+        torch.cuda.empty_cache()
+        gc.collect()

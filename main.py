@@ -3,6 +3,7 @@ import numpy as np
 from tqdm.notebook import tqdm
 
 import torch
+from torch.cuda.amp import autocast, GradScaler
 from data_loader import make_dataloaders
 from utils import create_loss_meters, log_results, update_losses, visualize
 from trainer import MainModel

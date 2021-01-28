@@ -1,4 +1,4 @@
-import time
+import os
 import torch
 import numpy as np
 import torch.nn as nn
@@ -71,6 +71,11 @@ def update_losses(model, loss_meter_dict, count):
         loss_meter.update(loss.item(), count=count)
 
 
+def log_results(loss_meter_dict):
+    for loss_name, loss_meter in loss_meter_dict.items():
+        print(f"{loss_name}: {loss_meter.avg:.5f}")
+
+
 def lab_to_rgb(L, ab):
     """
     Takes a batch of images
@@ -83,8 +88,10 @@ def lab_to_rgb(L, ab):
     for img in Lab:
         img_rgb = lab2rgb(img)
         rgb_imgs.append(img_rgb)
-
-    return torch.from_numpy(np.clip(np.stack(rgb_imgs, axis=0), 0, 255))
+    
+    # print(len(rgb_imgs))
+    return torch.from_numpy(np.clip(
+        np.concatenate(rgb_imgs, axis=1), 0, 255))
 
 
 def visualize(model, data, save_name=None):
@@ -111,16 +118,19 @@ def visualize(model, data, save_name=None):
             L.to(device)
             real_color.to(device)
             fake_color = model(L)
-    finally:
-        fake_imgs = lab_to_rgb(L, fake_color.detach())
-        real_imgs = lab_to_rgb(L, real_color.detach())
 
-    result_val = torch.cat((real_imgs, fake_imgs,), 2,)
+    
+    fake_imgs = lab_to_rgb(L, fake_color.detach())
+    real_imgs = lab_to_rgb(L, real_color.detach())
+
+    # print(fake_imgs.shape, real_imgs.shape)
+    result_val = torch.cat((real_imgs, fake_imgs,), 0)
+    # print(result_val.shape)
     save_image(
-        result_val, save_name, nrow=8, normalize=False,
+        result_val.permute(2, 0, 1), 
+        save_name, 
+        nrow=8, 
+        normalize=False,
     )
 
 
-def log_results(loss_meter_dict):
-    for loss_name, loss_meter in loss_meter_dict.items():
-        print(f"{loss_name}: {loss_meter.avg:.5f}")
