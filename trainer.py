@@ -122,6 +122,7 @@ class MainModel(nn.Module):
 
         self.scaler_D.scale(self.loss_D).backward()
         self.scaler_D.step(self.opt_D)
+        self.scaler_D.update()
 
         torch.cuda.empty_cache()
         gc.collect()
@@ -139,6 +140,7 @@ class MainModel(nn.Module):
 
         self.scaler_G.scale(self.loss_G).backward()
         self.scaler_G.step(self.opt_G)
+        self.scaler_G.update()
         
         torch.cuda.empty_cache()
         gc.collect()
