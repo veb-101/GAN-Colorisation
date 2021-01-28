@@ -152,6 +152,11 @@ class Generator_Unet(nn.Module):
         dec_5 = torch.cat((dec_5, enc_5), dim=1)
 
         dec_4 = self.deconv4(dec_5)
+        dec_4 = torch.cat((dec_4, enc_4), dim=1)
+
+        dec_3 = self.deconv3(dec_4)
+        dec_3 = torch.cat((dec_3, enc_3), dim=1)
+
         dec_2 = self.deconv2(dec_3)
         dec_2 = torch.cat((dec_2, enc_2), dim=1)
 
@@ -188,5 +193,5 @@ if __name__ == "__main__":
     im_size = 256
     # summary(Generator_Unet(image_size=(im_size,)), (1, im_size, im_size))
 
-    summary(Generator_Res_Unet.get_model(), (1, im_size, im_size))
+    # summary(Generator_Res_Unet.get_model(), (1, im_size, im_size))
     # summary(Discriminator(), (3, im_size, im_size))
