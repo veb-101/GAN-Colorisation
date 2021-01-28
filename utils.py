@@ -95,9 +95,10 @@ def lab_to_rgb(L, ab):
         np.concatenate(rgb_imgs, axis=1), 0, 255))
 
 
-def visualize(model, data, save_name=None):
+def visualize(model, data, save_name=None, device=None):
     try:
         model.net_G.eval()
+
         with torch.no_grad():
             model.setup_input(data)
             model.forward()
@@ -110,16 +111,13 @@ def visualize(model, data, save_name=None):
         L = model.L
 
     except:
-        device = (
-            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        )
+        # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         model.eval()
         with torch.no_grad():
             L, real_color = data["L"], data["ab"]
-            L.to(device)
-            real_color.to(device)
+            L = L.to(device)
+            real_color = real_color.to(device)
             fake_color = model(L)
-
     
     fake_imgs = lab_to_rgb(L, fake_color.detach())
     real_imgs = lab_to_rgb(L, real_color.detach())
