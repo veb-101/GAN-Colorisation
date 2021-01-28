@@ -103,7 +103,8 @@ class MainModel(nn.Module):
 
         with amp.autocast():
             self.forward()  # generate fake images 2 channel
-            fake_image = torch.cat([self.L, self.fake_color], dim=1)  # combine image L channel and generated ab channels
+        
+        fake_image = torch.cat([self.L, self.fake_color], dim=1)  # combine image L channel and generated ab channels
 
         # Train Discriminator
         self.opt_D.zero_grad()
@@ -137,7 +138,7 @@ class MainModel(nn.Module):
             self.loss_G = self.loss_G_GAN + self.loss_G_L1
 
         self.scaler_G.scale(self.loss_G).backward()
-        self.scaler_G(self.opt_G).step()
-
+        self.scaler_G.step(self.opt_G)
+        
         torch.cuda.empty_cache()
         gc.collect()

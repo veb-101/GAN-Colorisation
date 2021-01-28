@@ -73,7 +73,8 @@ def update_losses(model, loss_meter_dict, count):
 
 def log_results(loss_meter_dict):
     for loss_name, loss_meter in loss_meter_dict.items():
-        print(f"{loss_name}: {loss_meter.avg:.5f}")
+        print(f"{loss_name}: {loss_meter.avg:.5f}", end=" ")
+    print()
 
 
 def lab_to_rgb(L, ab):
