@@ -181,8 +181,8 @@ class Generator_Res_Unet(object):
         self.output_channels = n_output
         self.image_size = size
 
-    def get_model(self):
-        body = create_body(resnet18, pretrained=True, n_in=self.input_channels, cut=-2)
+    def get_model(self, pretrained=True):
+        body = create_body(resnet18, pretrained=pretrained, n_in=self.input_channels, cut=-2)
         net_G = DynamicUnet(
             body, self.output_channels, (self.image_size, self.image_size)
         )
