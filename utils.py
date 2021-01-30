@@ -3,6 +3,8 @@ import torch
 import numpy as np
 import torch.nn as nn
 from skimage.color import lab2rgb
+from skimage.metrics import peak_signal_noise_ratio as psnr
+from skimage.metrics import structural_similarity as ssim
 from torchvision.utils import save_image
 
 
@@ -89,10 +91,47 @@ def lab_to_rgb(L, ab):
     for img in Lab:
         img_rgb = lab2rgb(img)
         rgb_imgs.append(img_rgb)
-    
+
     # print(len(rgb_imgs))
-    return torch.from_numpy(np.clip(
-        np.concatenate(rgb_imgs, axis=1), 0, 255))
+    return torch.from_numpy(np.clip(np.concatenate(rgb_imgs, axis=1), 0, 255))
+
+
+def _psnr(ground, gen):
+    score = psnr(ground, gen, data_range=ground.max() - ground.min())
+    return round(score, 3)
+
+
+def _ssim(ground, gen):
+    score = ssim(gen, ground, data_range=ground.max() - ground.min(), multichannel=True)
+    return round(score, 3)
+
+
+def cal_img_metrics(generated, ground_truth):
+
+    # generated = generated
+    # ground_truth = ground_truth
+
+    scores_PSNR = []
+    scores_SSIM = []
+
+    # gen = gen.permute(0, 2, 3, 1).numpy() * 255.0
+    # ground = ground.permute(0, 2, 3, 1).numpy() * 255.0
+
+    for i in range(len(ground_truth)):
+        ground = ground_truth[i]
+        gen = generated[i]
+
+        # print(ground_truth.max() - ground_truth.min())
+        psnr_ = _psnr(ground, gen)
+        ssim_ = _ssim(ground, gen)
+
+        scores_PSNR.append(psnr_)
+        scores_SSIM.append(ssim_)
+
+    return (
+        round(sum(scores_PSNR) / len(scores_PSNR), 3),
+        round(sum(scores_SSIM) / len(scores_SSIM), 3),
+    )
 
 
 def visualize(model, data, save_name=None, device=None):
@@ -118,18 +157,17 @@ def visualize(model, data, save_name=None, device=None):
             L = L.to(device)
             real_color = real_color.to(device)
             fake_color = model(L)
-    
+
     fake_imgs = lab_to_rgb(L, fake_color.detach())
     real_imgs = lab_to_rgb(L, real_color.detach())
+
+    psnr_, ssim_ = cal_img_metrics(fake_imgs.clone().numpy(), real_imgs.clone().numpy())
 
     # print(fake_imgs.shape, real_imgs.shape)
     result_val = torch.cat((real_imgs, fake_imgs,), 0)
     # print(result_val.shape)
     save_image(
-        result_val.permute(2, 0, 1), 
-        save_name, 
-        nrow=8, 
-        normalize=False,
+        result_val.permute(2, 0, 1), save_name, nrow=8, normalize=False,
     )
-
+    return psnr_, ssim_
 
