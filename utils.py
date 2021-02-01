@@ -135,12 +135,10 @@ def cal_img_metrics(generated, ground_truth):
 
 
 def get_gray_scale(tensor, transformation):
-    print(tensor.size())
-    tensor = tensor.permute(2, 0, 1)
-    tensor = transformation(tensor)
-    tensor =  tensor.permute(1, 2, 0)
-    print(tensor.size())
-    return tensor
+    # print(tensor.size())
+    tensor = transformation(tensor.permute(2, 0, 1))
+    # print(tensor.size())
+    return tensor.permute(1, 2, 0)
 
 
 def visualize(model, data, save_name=None, device=None):
@@ -169,12 +167,12 @@ def visualize(model, data, save_name=None, device=None):
             fake_color = model(L)
 
     real_imgs = lab_to_rgb(L, real_color.detach())
-    real_imgs = get_gray_scale(real_imgs, gray_scale_transform)
-
     fake_imgs = lab_to_rgb(L, fake_color.detach())
     psnr_, ssim_ = cal_img_metrics(fake_imgs.clone().numpy(), real_imgs.clone().numpy())
-
+    
+    real_imgs = get_gray_scale(real_imgs, gray_scale_transform)
     # print(fake_imgs.shape, real_imgs.shape)
+    
     result_val = torch.cat((real_imgs, fake_imgs,), 0)
     # print(result_val.shape)
     save_image(
