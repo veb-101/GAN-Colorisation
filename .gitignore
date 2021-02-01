@@ -2,6 +2,9 @@ Deep-Learning
 *.bat
 *.zip
 *.png
+*.jpg
+*.jpeg
+*.tar
 test.py
 .ipynb_checkpoints
 __pycache__
