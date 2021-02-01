@@ -6,7 +6,7 @@ from skimage.color import lab2rgb
 from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
 from torchvision.utils import save_image
-
+import torchvision.transforms as T
 
 def init_weights(net, init="norm", gain=0.02):
     def init_func(m):
@@ -134,7 +134,17 @@ def cal_img_metrics(generated, ground_truth):
     )
 
 
+def get_gray_scale(tensor, transformation):
+    print(tensor.size())
+    tensor = tensor.permute(2, 0, 1)
+    tensor = transformation(tensor)
+    tensor =  tensor.permute(1, 2, 0)
+    print(tensor.size())
+    return tensor
+
+
 def visualize(model, data, save_name=None, device=None):
+    gray_scale_transform = T.Grayscale(num_output_channels=3)
     try:
         model.net_G.eval()
 
@@ -158,9 +168,10 @@ def visualize(model, data, save_name=None, device=None):
             real_color = real_color.to(device)
             fake_color = model(L)
 
-    fake_imgs = lab_to_rgb(L, fake_color.detach())
     real_imgs = lab_to_rgb(L, real_color.detach())
+    real_imgs = get_gray_scale(real_imgs, gray_scale_transform)
 
+    fake_imgs = lab_to_rgb(L, fake_color.detach())
     psnr_, ssim_ = cal_img_metrics(fake_imgs.clone().numpy(), real_imgs.clone().numpy())
 
     # print(fake_imgs.shape, real_imgs.shape)
