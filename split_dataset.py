@@ -1,11 +1,18 @@
-import gc
 import os
 import shutil
-from sklearn.model_selection import train_test_split
+import cv2
+import random
+import gc
+import numpy as np
 
-ROOT_DIR = r"images_og"
-TRAIN = r"images/train"
-VALID = r"images/valid"
+OG_FOLDER = "..\OG_Dataset"
+
+# IMAGE_FOLDERS = ["DIV2K_train_HR", "DIV2K_valid_HR", "Flickr2K"]
+IMAGE_FOLDERS = ["train2014"]
+local_folder = "images_og_2"
+
+IMG_SIZE = 256
+start = 0
 
 
 def create_folder(folder):
@@ -14,36 +21,28 @@ def create_folder(folder):
     os.makedirs(folder)
 
 
-def copy_files(source, destination, files):
-    create_folder(destination)
-    len_ = len(files)
-    for idx, image_name in enumerate(files):
-        image_path = os.path.join(source, image_name)
-        dest_path = os.path.join(destination, image_name)
-        try:
-            shutil.copy(image_path, dest_path)
-        except:
-            print(image_path)
-            print(dest_path)
+create_folder(local_folder)
 
-        if not (idx+1) % 50 or idx+1 == len_:
-            print(f"Copied: {idx+1}/{len_} images", end="\r")
 
+for folder in IMAGE_FOLDERS:
+    folder_path = os.path.join(OG_FOLDER, folder)
+    folder_ = os.listdir(folder_path)
+    folder_ = np.random.choice(folder_, size=10000, replace=False)
+    length = len(folder_)
+
+    # print(folder_path, length)
+    # continue
+    for idx, image_name in enumerate(sorted(folder_)):
+        image_path = os.path.join(folder_path, image_name)
+        raw_image = cv2.imread(image_path)
+
+        new_image_name = f"{start:05}.png"
+        bicubic_image = cv2.resize(raw_image, (IMG_SIZE, IMG_SIZE), cv2.INTER_CUBIC)
+
+        cv2.imwrite(os.path.join(local_folder, new_image_name), bicubic_image)
+
+        start += 1
+        del raw_image, bicubic_image
+        gc.collect()
+        print(f"{folder} -> Images Completed: {idx+1}/{length}", end="\r")
     print()
-    gc.collect()
-    return
-
-
-if __name__ == '__main__':
-
-    image_names = os.listdir(ROOT_DIR)
-    length = len(image_names)
-
-    images_train, images_valid = train_test_split(
-        image_names, shuffle=True, random_state=41, test_size=64
-    )
-
-    print("Train images:", len(images_train), "Validation images:", len(images_valid))
-
-    copy_files(ROOT_DIR, TRAIN, images_train)
-    copy_files(ROOT_DIR, VALID, images_valid)
