@@ -3,12 +3,13 @@ import shutil
 import cv2
 import random
 import gc
+import numpy as np
 
 OG_FOLDER = "..\OG_Dataset"
 
-IMAGE_FOLDERS = ["DIV2K_train_HR", "DIV2K_valid_HR", "Flickr2K"]
-
-local_folder = "images"
+# IMAGE_FOLDERS = ["DIV2K_train_HR", "DIV2K_valid_HR", "Flickr2K"]
+IMAGE_FOLDERS = ["train2014"]
+local_folder = "images_og_2"
 
 IMG_SIZE = 256
 start = 0
@@ -26,7 +27,9 @@ create_folder(local_folder)
 for folder in IMAGE_FOLDERS:
     folder_path = os.path.join(OG_FOLDER, folder)
     folder_ = os.listdir(folder_path)
+    folder_ = np.random.choice(folder_, size=10000, replace=False)
     length = len(folder_)
+
     # print(folder_path, length)
     # continue
     for idx, image_name in enumerate(sorted(folder_)):

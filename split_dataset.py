@@ -3,9 +3,9 @@ import os
 import shutil
 from sklearn.model_selection import train_test_split
 
-ROOT_DIR = r"images_og"
-TRAIN = r"images/train"
-VALID = r"images/valid"
+ROOT_DIR = r"images_og_2"
+TRAIN = r"images_2/train"
+VALID = r"images_2/valid"
 
 
 def create_folder(folder):
@@ -26,7 +26,7 @@ def copy_files(source, destination, files):
             print(image_path)
             print(dest_path)
 
-        if not (idx+1) % 50 or idx+1 == len_:
+        if not (idx + 1) % 50 or idx + 1 == len_:
             print(f"Copied: {idx+1}/{len_} images", end="\r")
 
     print()
@@ -34,7 +34,7 @@ def copy_files(source, destination, files):
     return
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
 
     image_names = os.listdir(ROOT_DIR)
     length = len(image_names)
