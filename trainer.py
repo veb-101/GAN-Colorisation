@@ -6,6 +6,25 @@ import torch.nn as nn
 import torch.optim as optim
 from utils import init_model
 from model import Discriminator, Generator_Res_Unet, Generator_Unet
+from torchvision.models import vgg19
+
+
+class PerceptualLoss(nn.Module):
+    def __init__(self):
+        super(PerceptualLoss, self).__init__()
+
+        vgg = vgg19(pretrained=True)
+        loss_network = nn.Sequential(*list(vgg.features)[:35]).eval()
+        for param in loss_network.parameters():
+            param.requires_grad = False
+        self.loss_network = loss_network
+        self.l1_loss = nn.L1Loss()
+
+    def forward(self, high_resolution, fake_high_resolution):
+        perception_loss = self.l1_loss(
+            self.loss_network(high_resolution), self.loss_network(fake_high_resolution)
+        )
+        return perception_loss
 
 
 class GANLoss(nn.Module):
@@ -41,7 +60,9 @@ class MainModel(nn.Module):
         scaler_G=None,
         scaler_D=None,
         device=None,
-        lambda_L1=100.0
+        perceptual_loss_factor=1.0,
+        adversarial_loss_factor=1.0,
+        lambda_L1=100.0,
     ):
         super().__init__()
 
@@ -77,15 +98,12 @@ class MainModel(nn.Module):
             self.opt_D = optim.Adam(
                 self.net_D.parameters(), lr=lr_D, betas=(beta1, beta2)
             )
-
+        self.PERcriterion = PerceptualLoss().to(self.device)
         self.GANcriterion = GANLoss(gan_mode="vanilla").to(self.device)
         self.L1criterion = nn.L1Loss().to(self.device)
+        self.perceptual_loss_factor = perceptual_loss_factor
+        self.adversarial_loss_factor = adversarial_loss_factor
         self.lambda_L1 = lambda_L1
-
-    # @staticmethod
-    # def set_requires_grad(model, requires_grad=True):
-    #     for p in model.parameters():
-    #         p.requires_grad = requires_grad
 
     def setup_input(self, data):
         self.L = data["L"].to(self.device)
@@ -103,22 +121,22 @@ class MainModel(nn.Module):
 
         with amp.autocast():
             self.forward()  # generate fake images 2 channel
-        
-        fake_image = torch.cat([self.L, self.fake_color], dim=1)  # combine image L channel and generated ab channels
+
+        fake_image = torch.cat([self.L, self.fake_color], dim=1)
+        real_image = torch.cat([self.L, self.ab], dim=1)
 
         # Train Discriminator
         self.opt_D.zero_grad()
 
         with amp.autocast():
-            # fake loss
-            fake_preds = self.net_D(fake_image.detach())
-            self.loss_D_fake = self.GANcriterion(fake_preds, False)
-            # real loss
-            real_image = torch.cat([self.L, self.ab], dim=1)
-            real_preds = self.net_D(real_image)
-            self.loss_D_real = self.GANcriterion(real_preds, True)
-            # discriminator final loss
-            self.loss_D = (self.loss_D_fake + self.loss_D_real) / 2.0
+            score_real = self.net_D(real_image)
+            score_fake = self.net_D(fake_image.detach())
+            # RaGan loss
+            discriminator_rf = score_real - score_fake.mean(axis=0, keepdim=True)
+            discriminator_fr = score_fake - score_real.mean(axis=0, keepdim=True)
+            adversarial_loss_rf = self.GANcriterion(discriminator_rf, True)
+            adversarial_loss_fr = self.GANcriterion(discriminator_fr, False)
+            self.loss_D = (adversarial_loss_fr + adversarial_loss_rf) / 2
 
         self.scaler_D.scale(self.loss_D).backward()
         self.scaler_D.step(self.opt_D)
@@ -133,14 +151,31 @@ class MainModel(nn.Module):
         fake_image = torch.cat([self.L, self.fake_color], dim=1)
 
         with amp.autocast():
-            fake_preds = self.net_D(fake_image)
-            self.loss_G_GAN = self.GANcriterion(fake_preds, True)
+
+            # Perceptual loss
+            self.loss_G_per = (
+                self.PERcriterion(real_image, fake_image) * self.perceptual_loss_factor
+            )
+
+            # RaGan loss
+            score_real = self.net_D(real_image).detach()
+            score_fake = self.net_D(fake_image)
+            discriminator_rf = score_real - score_fake.mean(axis=0, keepdim=True)
+            discriminator_fr = score_fake - score_real.mean(axis=0, keepdim=True)
+            adversarial_loss_rf = self.GANcriterion(discriminator_rf, False)
+            adversarial_loss_fr = self.GANcriterion(discriminator_fr, True)
+
+            self.loss_G_GAN = (
+                (adversarial_loss_fr + adversarial_loss_rf) / 2
+            ) * self.adversarial_loss_factor
+            # ----------------------
+
             self.loss_G_L1 = self.L1criterion(self.fake_color, self.ab) * self.lambda_L1
-            self.loss_G = self.loss_G_GAN + self.loss_G_L1
+            self.loss_G = self.loss_G_per + self.loss_G_GAN + self.loss_G_L1
 
         self.scaler_G.scale(self.loss_G).backward()
         self.scaler_G.step(self.opt_G)
         self.scaler_G.update()
-        
+
         torch.cuda.empty_cache()
         gc.collect()

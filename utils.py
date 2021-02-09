@@ -8,6 +8,7 @@ from skimage.metrics import structural_similarity as ssim
 from torchvision.utils import save_image
 import torchvision.transforms as T
 
+
 def init_weights(net, init="norm", gain=0.02):
     def init_func(m):
         classname = m.__class__.__name__
@@ -55,12 +56,14 @@ def create_loss_meters():
     loss_D = AverageMeter()
     loss_G_GAN = AverageMeter()
     loss_G_L1 = AverageMeter()
+    loss_G_per = AverageMeter()
     loss_G = AverageMeter()
 
     return {
         # "loss_D_fake": loss_D_fake,
         # "loss_D_real": loss_D_real,
         "loss_D": loss_D,
+        "loss_G_per": loss_G_per,
         "loss_G_GAN": loss_G_GAN,
         "loss_G_L1": loss_G_L1,
         "loss_G": loss_G,
@@ -169,10 +172,10 @@ def visualize(model, data, save_name=None, device=None):
     real_imgs = lab_to_rgb(L, real_color.detach())
     fake_imgs = lab_to_rgb(L, fake_color.detach())
     psnr_, ssim_ = cal_img_metrics(fake_imgs.clone().numpy(), real_imgs.clone().numpy())
-    
+
     real_imgs = get_gray_scale(real_imgs, gray_scale_transform)
     # print(fake_imgs.shape, real_imgs.shape)
-    
+
     result_val = torch.cat((real_imgs, fake_imgs,), 0)
     # print(result_val.shape)
     save_image(
