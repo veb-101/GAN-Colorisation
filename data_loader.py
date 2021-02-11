@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader, Dataset
 
 
 class ColorizationDataset(Dataset):
-    def __init__(self, size=256, num_images=-1, path=None, is_training=True):
+    def __init__(self, size=128, num_images=-1, path=None, is_training=True):
         self.image_size = size
         self.is_training = is_training
         self.path = path
@@ -18,8 +18,11 @@ class ColorizationDataset(Dataset):
         if num_images == -1:
             num_images = len(self.image_paths)
 
-        self.image_file_name = np.random.choice(self.image_paths, size=num_images, replace=False)
-        
+        self.image_file_name = np.random.choice(
+            self.image_paths, size=num_images, replace=False
+        )
+        if not is_training:
+            self.image_file_name = sorted(self.image_file_name)
 
         if self.is_training:
             self.transforms = T.Compose(

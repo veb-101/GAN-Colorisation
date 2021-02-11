@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
+from fastai.vision.learner import create_body
+from torchvision.models.resnet import resnet18
+from fastai.vision.models.unet import DynamicUnet
+from torch.nn.utils import spectral_norm
+from torchsummary import summary
 import torch.nn.functional as F
-
-from fastai.torch_imports import *
-
-# from fastai.conv_learner import *
-from torch.nn.utils.spectral_norm import spectral_norm
 
 
 class SelfAttention(nn.Module):
@@ -43,178 +43,239 @@ class SelfAttention(nn.Module):
         return out
 
 
-# UNET PARTS
-class double_conv(nn.Module):
-    """(conv => BN => ReLU) * 2"""
+def _downscale_layers(
+    in_filters=None,
+    out_filters=None,
+    kernel_size=4,
+    stride_step=2,
+    padding_size=1,
+    bias=False,
+    batch_norm=True,
+):
+    layer = []
+    layer.append(
+        spectral_norm(
+            nn.Conv2d(
+                in_channels=in_filters,
+                out_channels=out_filters,
+                kernel_size=kernel_size,
+                stride=stride_step,
+                padding=padding_size,
+                bias=bias,
+            )
+        )
+    )
+    if batch_norm:
+        layer.append(nn.BatchNorm2d(out_filters))
 
-    def __init__(self, in_ch, out_ch):
-        super(double_conv, self).__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(in_ch, out_ch, 3, padding=1),
-            nn.BatchNorm2d(out_ch),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(out_ch, out_ch, 3, padding=1),
-            nn.BatchNorm2d(out_ch),
-            nn.LeakyReLU(0.2, inplace=True),
-            SelfAttention(out_ch, 1),
+    layer.append(nn.LeakyReLU(0.2, True))
+    layer.append(SelfAttention(out_filters, 1))
+    return nn.Sequential(*layer)
+
+
+def _upscale_layers(
+    in_filters=None,
+    out_filters=None,
+    kernel_size=4,
+    stride_step=2,
+    padding_size=1,
+    bias=False,
+    batch_norm=True,
+):
+    layer = []
+
+    layer.append(
+        spectral_norm(
+            nn.ConvTranspose2d(
+                in_channels=in_filters,
+                out_channels=out_filters,
+                kernel_size=kernel_size,
+                stride=stride_step,
+                padding=padding_size,
+                bias=bias,
+            )
+        )
+    )
+
+    if batch_norm:
+        layer.append(nn.BatchNorm2d(out_filters))
+
+    layer.append(nn.ReLU(inplace=True))
+    layer.append(SelfAttention(out_filters, 1))
+
+    return nn.Sequential(*layer)
+
+
+class Discriminator(nn.Module):
+    def __init__(self, input_channels=3, image_size=(128,)):
+        super().__init__()
+        self.img_size = image_size[0]
+        self.conv0 = _downscale_layers(input_channels, 64, batch_norm=False)
+        self.conv1 = _downscale_layers(64, 128)
+        self.conv2 = _downscale_layers(128, 256)
+        self.conv3 = _downscale_layers(256, 512, stride_step=1)
+        # self.conv4 = _downscale_layers(512, 512)
+        # self.conv5 = _downscale_layers(512, 512)
+        self.last_layer = nn.Sequential(
+            nn.Conv2d(512, 1, kernel_size=4, stride=1, padding=1)
         )
 
     def forward(self, x):
-        x = self.conv(x)
-        return x
+        out = self.conv0(x)
+        out = self.conv1(out)
+        out = self.conv2(out)
+        out = self.conv3(out)
+        # out = self.conv4(out)
+        # out = self.conv5(out)
+        out = self.last_layer(out)
+        return out
 
 
-class inconv(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super(inconv, self).__init__()
-        self.conv = double_conv(in_ch, out_ch)
+class Generator_Unet(nn.Module):
+    def __init__(self, input_channels=1, output_channels=2, image_size=(256,)):
+        super().__init__()
 
-    def forward(self, x):
-        x = self.conv(x)
-        return x
+        self.image_size = image_size[0]
+        self.conv0 = _downscale_layers(
+            input_channels, 64, kernel_size=3, stride_step=1, batch_norm=False
+        )
+        self.conv1 = _downscale_layers(64, 64)
+        self.conv2 = _downscale_layers(64, 128)
+        self.conv3 = _downscale_layers(128, 256)
+        self.conv4 = _downscale_layers(256, 512)
+        self.conv5 = _downscale_layers(512, 512)
+        # self.conv6 = _downscale_layers(512, 512)
 
+        self.intermediate = _downscale_layers(512, 512)
 
-class down(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super(down, self).__init__()
-        self.mpconv = nn.Sequential(nn.MaxPool2d(2), double_conv(in_ch, out_ch))
+        # self.deconv6 = _upscale_layers(512 * 1, 512)
+        self.deconv5 = _upscale_layers(512 * 1, 512)
+        self.deconv4 = _upscale_layers(512 * 2, 512)
+        self.deconv3 = _upscale_layers(512 * 2, 256)
+        self.deconv2 = _upscale_layers(256 * 2, 128)
+        self.deconv1 = _upscale_layers(128 * 2, 64)
+        self.deconv0 = _upscale_layers(64 * 2, 64)
 
-    def forward(self, x):
-        x = self.mpconv(x)
-        return x
-
-
-class up(nn.Module):
-    def __init__(self, in_ch, out_ch, bilinear=False):
-        super(up, self).__init__()
-
-        #  would be a nice idea if the upsampling could be learned too,
-        #  but my machine do not have enough memory to handle all those weights
-        if bilinear:
-            self.up = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
-        else:
-            self.up = nn.ConvTranspose2d(in_ch, in_ch // 2, 2, stride=2)
-
-        self.conv = double_conv(in_ch, out_ch)
-
-    def forward(self, x1, x2):
-
-        x1 = self.up(x1)
-
-        # input is CHW
-        diffY = x2.size()[2] - x1.size()[2]
-        diffX = x2.size()[3] - x1.size()[3]
-
-        x1 = F.pad(x1, (diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2))
-
-        # for padding issues, see
-        # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
-        # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
-
-        x = torch.cat([x2, x1], dim=1)
-        x = self.conv(x)
-        return x
-
-
-class outconv(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super(outconv, self).__init__()
-        self.conv = nn.Conv2d(in_ch, out_ch, 1)
-
-    def forward(self, x):
-        x = self.conv(x)
-        return x
-
-
-# ASSEMBLE PARTS TO GET UNET
-class UNet(nn.Module):
-    def __init__(self, n_channels, n_classes):
-        super(UNet, self).__init__()
-        self.inc = inconv(n_channels, 64)
-        self.down1 = down(64, 128)
-        self.down2 = down(128, 256)
-        self.down3 = down(256, 512)
-        self.down4 = down(512, 1024)
-        self.up1 = up(1024, 512)
-        self.up2 = up(512, 256)
-        self.up3 = up(256, 128)
-        self.up4 = up(128, 64)
-        self.outc = outconv(64, n_classes)
-
-    def forward(self, x):
-        #         import pdb; pdb.set_trace()
-        # Sample outputs are for an input image size - 32 and bs - 32
-        x1 = self.inc(x)  # x ~ [32, 1, 32, 32]
-        x2 = self.down1(x1)  # x1 ~ [32, 64, 32, 32]
-        x3 = self.down2(x2)  # x2 ~ [32, 128, 16, 16]
-        x4 = self.down3(x3)  # x3 ~ [32, 256, 8, 8]
-        x5 = self.down4(x4)  # x4 ~ [32, 512, 4, 4], x5~ [32, 1024, 2, 2]
-        x = self.up1(x5, x4)  # [32, 512, 4, 4]
-        x = self.up2(x, x3)  # [32, 256, 8, 8]
-        x = self.up3(x, x2)  # [32, 128, 16, 16]
-        x = self.up4(x, x1)  # [32, 64, 32, 32]
-        x = self.outc(x)  # [32, 2, 32, 32]
-        return torch.tanh(x)
-
-
-class dis_conv_unit(nn.Module):
-    """(conv => BN => ReLU)"""
-
-    def __init__(self, in_ch, out_ch):
-        super(dis_conv_unit, self).__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(in_ch, out_ch, 3, stride=2, padding=1),
-            nn.BatchNorm2d(out_ch),
-            nn.LeakyReLU(0.1, inplace=True),
+        self.conv_penultimate = spectral_norm(
+            nn.Conv2d(
+                in_channels=64 * 2,
+                out_channels=output_channels,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=False,
+            )
         )
 
-    def forward(self, x):
-        x = self.conv(x)
-        return x
-
-
-class ConvDis(nn.Module):
-    """Discriminator"""
-
-    def __init__(self, in_channels=2, in_size=128):
-        super(ConvDis, self).__init__()
-
-        self.conv1 = dis_conv_unit(in_channels, 64)
-        self.conv2 = dis_conv_unit(64, 128)
-        self.conv3 = dis_conv_unit(128, 256)
-        self.conv4 = dis_conv_unit(256, 512)
-        self.conv5 = dis_conv_unit(512, 512)
-
-        # Downsampled size after 5 convs
-        ds_size = in_size // 2 ** 5
-
-        self.conv6 = nn.Conv2d(512, 512, ds_size, stride=1)
-        self.bn6 = nn.BatchNorm2d(512)
-        self.relu6 = nn.LeakyReLU(0.1)
-
-        self.conv7 = nn.Conv2d(512, 1, 1, stride=1)
-
-        self.fc = nn.Linear(512 * ds_size ** 2, 1)
+        self.conv_final = nn.Conv2d(
+            in_channels=output_channels,
+            out_channels=output_channels,
+            kernel_size=1,
+            stride=1,
+            bias=False,
+        )
+        self.batch_norm = nn.BatchNorm2d(output_channels)
+        self.leaky_relu = nn.LeakyReLU(0.2)
+        self.tanh = nn.Tanh()
 
     def forward(self, x):
-        h = x
-        h = self.conv1(h)
-        h = self.conv2(h)
-        h = self.conv3(h)
-        h = self.conv4(h)
-        h = self.conv5(h)
 
-        h = self.conv6(h)
-        h = self.bn6(h)
-        h = self.relu6(h)
+        enc_0 = self.conv0(x)
+        enc_1 = self.conv1(enc_0)
+        enc_2 = self.conv2(enc_1)
+        enc_3 = self.conv3(enc_2)
+        enc_4 = self.conv4(enc_3)
+        enc_5 = self.conv5(enc_4)
 
-        h = self.conv7(h)
-        h = F.sigmoid(h)
+        output = self.intermediate(enc_5)
 
-        return h
+        output = self.deconv5(output)
+        output = torch.cat((output, enc_5), dim=1)
+
+        output = self.deconv4(output)
+        output = torch.cat((output, enc_4), dim=1)
+
+        output = self.deconv3(output)
+        output = torch.cat((output, enc_3), dim=1)
+
+        output = self.deconv2(output)
+        output = torch.cat((output, enc_2), dim=1)
+
+        output = self.deconv1(output)
+        output = torch.cat((output, enc_1), dim=1)
+
+        output = self.deconv0(output)
+        output = torch.cat((output, enc_0), dim=1)
+
+        output = self.conv_penultimate(output)
+        output = self.batch_norm(output)
+        output = self.leaky_relu(output)
+
+        output = self.conv_final(output)
+        output = self.tanh(output)
+        return output
+
+    # def forward(self, x):
+
+    #     enc_0 = self.conv0(x)
+    #     enc_1 = self.conv1(enc_0)
+    #     enc_2 = self.conv2(enc_1)
+    #     enc_3 = self.conv3(enc_2)
+    #     enc_4 = self.conv4(enc_3)
+    #     enc_5 = self.conv5(enc_4)
+    #     enc_6 = self.conv6(enc_5)
+
+    #     output = self.intermediate(enc_6)
+
+    #     dec_6 = self.deconv6(output)
+    #     dec_6 = torch.cat((dec_6, enc_6), dim=1)
+
+    #     dec_5 = self.deconv5(dec_6)
+    #     dec_5 = torch.cat((dec_5, enc_5), dim=1)
+
+    #     dec_4 = self.deconv4(dec_5)
+    #     dec_4 = torch.cat((dec_4, enc_4), dim=1)
+
+    #     dec_3 = self.deconv3(dec_4)
+    #     dec_3 = torch.cat((dec_3, enc_3), dim=1)
+
+    #     dec_2 = self.deconv2(dec_3)
+    #     dec_2 = torch.cat((dec_2, enc_2), dim=1)
+
+    #     dec_1 = self.deconv1(dec_2)
+    #     dec_1 = torch.cat((dec_1, enc_1), dim=1)
+
+    #     dec_0 = self.deconv0(dec_1)
+    #     dec_0 = torch.cat((dec_0, enc_0), dim=1)
+
+    #     output = self.conv_penultimate(dec_0)
+    #     output = self.batch_norm(output)
+    #     output = self.leaky_relu(output)
+
+    #     output = self.conv_final(output)
+    #     output = self.tanh(output)
+    # return output
+
+
+class Generator_Res_Unet(object):
+    def __init__(self, n_input=1, n_output=2, size=256):
+        self.input_channels = n_input
+        self.output_channels = n_output
+        self.image_size = size
+
+    def get_model(self, pretrained=True):
+        body = create_body(
+            resnet18, pretrained=pretrained, n_in=self.input_channels, cut=-2
+        )
+        net_G = DynamicUnet(
+            body, self.output_channels, (self.image_size, self.image_size)
+        )
+        return net_G
 
 
 if __name__ == "__main__":
-    from torchsummary import summary
+    im_size = 128
+    # summary(Generator_Unet(image_size=(im_size,)).to("cuda"), (1, im_size, im_size))
 
-    summary(UNet(1, 2), (1, 128, 128))
+    # summary(Generator_Res_Unet.get_model(), (1, im_size, im_size))
+    summary(Discriminator(), (3, im_size, im_size))
