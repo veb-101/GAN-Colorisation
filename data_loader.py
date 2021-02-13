@@ -21,8 +21,6 @@ class ColorizationDataset(Dataset):
         self.image_file_name = np.random.choice(
             self.image_paths, size=num_images, replace=False
         )
-        if not is_training:
-            self.image_file_name = sorted(self.image_file_name)
 
         if self.is_training:
             self.transforms = T.Compose(
@@ -33,6 +31,7 @@ class ColorizationDataset(Dataset):
                 ]
             )
         else:
+            self.image_file_name = sorted(self.image_file_name)
             self.transforms = T.Compose(
                 [T.Resize((self.image_size, self.image_size), Image.BICUBIC),]
             )
