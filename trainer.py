@@ -9,7 +9,7 @@ from model import Discriminator, Generator_Res_Unet, Generator_Unet
 
 
 class GANLoss(nn.Module):
-    def __init__(self, gan_mode="vanilla", real_label=1.0, fake_label=0.0):
+    def __init__(self, gan_mode="vanilla", real_label=0.9, fake_label=0.0):
         super().__init__()
         self.register_buffer("real_label", torch.tensor(real_label))
         self.register_buffer("fake_label", torch.tensor(fake_label))
@@ -41,7 +41,7 @@ class MainModel(nn.Module):
         scaler_G=None,
         scaler_D=None,
         device=None,
-        lambda_L1=100.0
+        lambda_L1=100.0,
     ):
         super().__init__()
 
@@ -103,8 +103,10 @@ class MainModel(nn.Module):
 
         with amp.autocast():
             self.forward()  # generate fake images 2 channel
-        
-        fake_image = torch.cat([self.L, self.fake_color], dim=1)  # combine image L channel and generated ab channels
+
+        fake_image = torch.cat(
+            [self.L, self.fake_color], dim=1
+        )  # combine image L channel and generated ab channels
 
         # Train Discriminator
         self.opt_D.zero_grad()
@@ -122,7 +124,9 @@ class MainModel(nn.Module):
 
         self.scaler_D.scale(self.loss_D).backward()
         self.scaler_D.step(self.opt_D)
+        dis_scale_val = self.scaler_D.get_scale()
         self.scaler_D.update()
+        skip_dis_lr_sched = dis_scale_val != self.scaler_D.get_scale()
 
         torch.cuda.empty_cache()
         gc.collect()
@@ -140,7 +144,11 @@ class MainModel(nn.Module):
 
         self.scaler_G.scale(self.loss_G).backward()
         self.scaler_G.step(self.opt_G)
+
+        scale_gen = self.scaler_G.get_scale()
         self.scaler_G.update()
-        
+        skip_gen_lr_sched = scale_gen != self.scaler_G.get_scale()
+
         torch.cuda.empty_cache()
         gc.collect()
+        return (skip_gen_lr_sched, skip_dis_lr_sched)
