@@ -216,16 +216,22 @@ class Generator_Unet(nn.Module):
         return output
 
 
-class Generator_Res_Unet(object):
+class Generator_Res_Unet(object, model_number=18):
     def __init__(self, n_input=1, n_output=2, size=256):
         self.input_channels = n_input
         self.output_channels = n_output
         self.image_size = size
+        self.model_number = 18
 
     def get_model(self, pretrained=True):
-        body = create_body(
-            resnet34, pretrained=pretrained, n_in=self.input_channels, cut=-2
-        )
+        if self.model_number == 18:
+            body = create_body(
+                resnet18, pretrained=pretrained, n_in=self.input_channels, cut=-2
+            )
+        else:
+            body = create_body(
+                resnet34, pretrained=pretrained, n_in=self.input_channels, cut=-2
+            )
         net_G = DynamicUnet(
             body, self.output_channels, (self.image_size, self.image_size)
         )
