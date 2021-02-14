@@ -144,12 +144,12 @@ class Generator_Unet(nn.Module):
         self.conv3 = _downscale_layers(128, 256)
         self.conv4 = _downscale_layers(256, 512)
         self.conv5 = _downscale_layers(512, 512)
-        # self.conv6 = _downscale_layers(512, 512)
+        self.conv6 = _downscale_layers(512, 512)
 
         self.intermediate = _downscale_layers(512, 512)
 
-        # self.deconv6 = _upscale_layers(512 * 1, 512)
-        self.deconv5 = _upscale_layers(512 * 1, 512)
+        self.deconv6 = _upscale_layers(512 * 1, 512)
+        self.deconv5 = _upscale_layers(512 * 2, 512)
         self.deconv4 = _upscale_layers(512 * 2, 512)
         self.deconv3 = _upscale_layers(512 * 2, 256)
         self.deconv2 = _upscale_layers(256 * 2, 128)
@@ -186,8 +186,12 @@ class Generator_Unet(nn.Module):
         enc_3 = self.conv3(enc_2)
         enc_4 = self.conv4(enc_3)
         enc_5 = self.conv5(enc_4)
+        enc_6 = self.conv6(enc_5)
 
-        output = self.intermediate(enc_5)
+        output = self.intermediate(enc_6)
+
+        output = self.deconv6(output)
+        output = torch.cat((output, enc_6), dim=1)
 
         output = self.deconv5(output)
         output = torch.cat((output, enc_5), dim=1)
@@ -213,6 +217,7 @@ class Generator_Unet(nn.Module):
 
         output = self.conv_final(output)
         output = self.tanh(output)
+
         return output
 
 
