@@ -216,8 +216,8 @@ class Generator_Unet(nn.Module):
         return output
 
 
-class Generator_Res_Unet(object, model_number=18):
-    def __init__(self, n_input=1, n_output=2, size=256):
+class Generator_Res_Unet(object):
+    def __init__(self, n_input=1, n_output=2, size=256, model_number=18):
         self.input_channels = n_input
         self.output_channels = n_output
         self.image_size = size
