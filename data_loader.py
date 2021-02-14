@@ -26,7 +26,6 @@ class ColorizationDataset(Dataset):
             self.transforms = T.Compose(
                 [
                     T.Resize((self.image_size, self.image_size), Image.BICUBIC),
-                    T.RandomVerticalFlip(0.5),
                     T.RandomHorizontalFlip(0.5),
                 ]
             )

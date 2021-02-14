@@ -8,3 +8,4 @@ Deep-Learning
 test.py
 .ipynb_checkpoints
 __pycache__
+final_model_weights.pt
