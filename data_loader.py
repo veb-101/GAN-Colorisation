@@ -18,18 +18,19 @@ class ColorizationDataset(Dataset):
         if num_images == -1:
             num_images = len(self.image_paths)
 
-        self.image_file_name = np.random.choice(self.image_paths, size=num_images, replace=False)
-        
+        self.image_file_name = np.random.choice(
+            self.image_paths, size=num_images, replace=False
+        )
 
         if self.is_training:
             self.transforms = T.Compose(
                 [
                     T.Resize((self.image_size, self.image_size), Image.BICUBIC),
-                    T.RandomVerticalFlip(0.5),
                     T.RandomHorizontalFlip(0.5),
                 ]
             )
         else:
+            self.image_file_name = sorted(self.image_file_name)
             self.transforms = T.Compose(
                 [T.Resize((self.image_size, self.image_size), Image.BICUBIC),]
             )

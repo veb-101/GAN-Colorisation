@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from fastai.vision.learner import create_body
-from torchvision.models.resnet import resnet18
+from torchvision.models.resnet import resnet18, resnet34
 from fastai.vision.models.unet import DynamicUnet
 from torch.nn.utils import spectral_norm
 from torchsummary import summary
@@ -224,7 +224,7 @@ class Generator_Res_Unet(object):
 
     def get_model(self, pretrained=True):
         body = create_body(
-            resnet18, pretrained=pretrained, n_in=self.input_channels, cut=-2
+            resnet34, pretrained=pretrained, n_in=self.input_channels, cut=-2
         )
         net_G = DynamicUnet(
             body, self.output_channels, (self.image_size, self.image_size)
@@ -233,8 +233,8 @@ class Generator_Res_Unet(object):
 
 
 if __name__ == "__main__":
-    im_size = 128
+    im_size = 256
     # summary(Generator_Unet(image_size=(im_size,)).to("cuda"), (1, im_size, im_size))
 
-    # summary(Generator_Res_Unet.get_model(), (1, im_size, im_size))
-    summary(Discriminator(), (3, im_size, im_size))
+    summary(Generator_Res_Unet().get_model(), (1, im_size, im_size))
+    # summary(Discriminator(), (3, im_size, im_size))
