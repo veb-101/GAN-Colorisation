@@ -143,7 +143,7 @@ class MainModel(nn.Module):
             adversarial_loss_rf = self.GANcriterion(discriminator_rf, True) * 0.5
 
             # Fake
-            score_fake = self.discriminator(fake_image.detach())
+            score_fake = self.net_D(fake_image.detach())
             discriminator_fr = score_fake - score_real.mean(axis=0, keepdim=True)
             adversarial_loss_fr = self.GANcriterion(discriminator_fr, False) * 0.5
 
